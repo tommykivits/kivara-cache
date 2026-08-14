@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="phpcs-for-your-project">
+    <!-- include root folder of project -->
+    <file>.</file>
+
+    <!-- exclude paths -->
+    <exclude-pattern>./vendor</exclude-pattern>
+
+    <!-- include all rules in the Finetic ruleset -->
+    <rule ref="Finetic"/>
+</ruleset>
