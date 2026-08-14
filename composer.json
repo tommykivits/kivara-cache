@@ -1,0 +1,38 @@
+{
+  "name": "kivara/cache",
+  "description": "Lightweight Cache library for PHP",
+  "type": "project",
+  "minimum-stability": "stable",
+  "license": "proprietary",
+  "authors": [
+    {
+      "name": "Tommy",
+      "email": "tommykivits@gmail.com"
+    }
+  ],
+  "require": {
+    "php": "^8.3",
+    "psr/http-message": "^2.0",
+    "psr/http-server-handler": "^1.0",
+    "psr/http-server-middleware": "^1.0",
+    "psr/container": "^2.0",
+    "ext-zend-opcache": "*",
+    "ext-redis": "*",
+    "ext-apcu": "*"
+  },
+  "require-dev": {
+    "nyholm/psr7": "^1.8",
+    "nyholm/psr7-server": "^1.1",
+    "finetic/coding-standard": "^4.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "Kivara\\Cache\\": "src"
+    }
+  },
+  "config": {
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    }
+  }
+}
