@@ -7,9 +7,11 @@ namespace Kivara\Cache\Stores;
 use APCUIterator;
 use Closure;
 use Kivara\Cache\Contracts\CacheStore;
+use Kivara\Cache\Enums\Ttl;
 use Kivara\Cache\Exceptions\CacheException;
 use Kivara\Cache\Services\FileLock;
 use Kivara\Cache\Traits\HasFileLocks;
+use Override;
 
 use function apcu_delete;
 use function apcu_exists;
@@ -23,6 +25,7 @@ use function ini_get;
 use function preg_quote;
 use function rtrim;
 use function sprintf;
+use function substr;
 use function unlink;
 
 /**
@@ -54,6 +57,7 @@ final readonly class APCu implements CacheStore
         $this->prefix = rtrim($namespace, ':') . ':';
     }
 
+    #[Override]
     public function get(string $key): mixed
     {
         $value = apcu_fetch($this->prefixed($key), $success);
@@ -64,20 +68,25 @@ final readonly class APCu implements CacheStore
     /**
      * @throws CacheException
      */
-    public function put(string $key, mixed $callback, ?int $ttl = null): void
+    #[Override]
+    public function put(string $key, mixed $callback, Ttl|int|null $ttl = null): void
     {
         if ($callback instanceof Closure) {
             throw new CacheException('Closures cannot be stored in the APCu cache.');
         }
 
-        apcu_store($this->prefixed($key), $callback, $ttl ?? 0);
+        $ttlSeconds = $ttl instanceof Ttl ? $ttl->value : $ttl;
+
+        apcu_store($this->prefixed($key), $callback, $ttlSeconds ?? 0);
     }
 
+    #[Override]
     public function has(string $key): bool
     {
         return apcu_exists($this->prefixed($key));
     }
 
+    #[Override]
     public function forget(string $key): void
     {
         apcu_delete($this->prefixed($key));
@@ -85,6 +94,7 @@ final readonly class APCu implements CacheStore
         $this->releaseLockFile($this->lockPath($key));
     }
 
+    #[Override]
     public function flush(): void
     {
         foreach (new APCUIterator('/^' . preg_quote($this->prefix, '/') . '/') as $entry) {
@@ -113,7 +123,9 @@ final readonly class APCu implements CacheStore
 
     protected function lockPath(string $key): string
     {
-        return sprintf('%s/%s.lock', rtrim($this->lockDirectory, '/'), hash('sha256', $this->prefixed($key)));
+        $hash = hash('sha256', $this->prefixed($key));
+
+        return sprintf('%s/%s/%s.lock', rtrim($this->lockDirectory, '/'), substr($hash, 0, 2), $hash);
     }
 
     private function prefixed(string $key): string

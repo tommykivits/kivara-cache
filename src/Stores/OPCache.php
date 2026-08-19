@@ -6,11 +6,15 @@ namespace Kivara\Cache\Stores;
 
 use Closure;
 use Kivara\Cache\Contracts\CacheStore;
+use Kivara\Cache\Enums\Ttl;
 use Kivara\Cache\Exceptions\CacheException;
 use Kivara\Cache\Services\FileLock;
+use Kivara\Cache\Services\Filesystem;
 use Kivara\Cache\Traits\HasFileLocks;
+use Override;
 
 use function array_key_exists;
+use function dirname;
 use function file_exists;
 use function file_put_contents;
 use function fopen;
@@ -20,12 +24,13 @@ use function hash;
 use function is_array;
 use function is_dir;
 use function is_int;
-use function mkdir;
 use function opcache_invalidate;
 use function rename;
+use function rmdir;
 use function rtrim;
 use function sprintf;
 use function str_ends_with;
+use function substr;
 use function tempnam;
 use function time;
 use function unlink;
@@ -48,19 +53,14 @@ final readonly class OPCache implements CacheStore
     public function __construct(
         private string $directory,
         private string $extension = '.cache.php',
+        private Filesystem $filesystem = new Filesystem(),
     ) {
-        if (
-            is_dir($this->directory) === false
-            && mkdir($this->directory, 0755, recursive: true) === false
-            && is_dir($this->directory) === false
-        ) {
-            throw new CacheException(sprintf('Cache directory [%s] could not be created.', $this->directory));
+        foreach([$this->directory, $this->locksDirectoryPath()] as $dir) {
+            $this->filesystem->ensureDirectoryExists($dir);
         }
     }
 
-    /**
-     * @throws CacheException
-     */
+    #[Override]
     public function get(string $key): mixed
     {
         $record = $this->read($key);
@@ -80,14 +80,17 @@ final readonly class OPCache implements CacheStore
     /**
      * @throws CacheException
      */
-    public function put(string $key, mixed $callback, ?int $ttl = null): void
+    #[Override]
+    public function put(string $key, mixed $callback, Ttl|int|null $ttl = null): void
     {
         if ($callback instanceof Closure) {
             throw new CacheException('Closures cannot be stored in the OPcache store.');
         }
 
-        $expiresAt = $ttl !== null
-            ? time() + $ttl
+        $ttlSeconds = $ttl instanceof Ttl ? $ttl->value : $ttl;
+
+        $expiresAt = $ttlSeconds !== null
+            ? time() + $ttlSeconds
             : null;
 
         $this->writeFile($this->dataPath($key), ['expires_at' => $expiresAt, 'value' => $callback]);
@@ -96,6 +99,7 @@ final readonly class OPCache implements CacheStore
     /**
      * @throws CacheException
      */
+    #[Override]
     public function has(string $key): bool
     {
         $record = $this->read($key);
@@ -115,6 +119,7 @@ final readonly class OPCache implements CacheStore
     /**
      * @throws CacheException
      */
+    #[Override]
     public function forget(string $key): void
     {
         $path = $this->dataPath($key);
@@ -132,9 +137,10 @@ final readonly class OPCache implements CacheStore
     /**
      * @throws CacheException
      */
+    #[Override]
     public function flush(): void
     {
-        $pattern = sprintf('%s/*%s', $this->directoryPath(), $this->extension);
+        $pattern = sprintf('%s/*/*%s', $this->directoryPath(), $this->extension);
 
         $files = glob($pattern);
         if ($files !== false) {
@@ -151,12 +157,30 @@ final readonly class OPCache implements CacheStore
             }
         }
 
-        $lockPattern = sprintf('%s/*.lock', $this->locksDirectoryPath());
+        $directories = glob(sprintf('%s/*', $this->directoryPath()));
+        if ($directories !== false) {
+            foreach ($directories as $dir) {
+                if (is_dir($dir) === true && $dir !== $this->locksDirectoryPath()) {
+                    @rmdir($dir);
+                }
+            }
+        }
+
+        $lockPattern = sprintf('%s/*/*.lock', $this->locksDirectoryPath());
 
         $lockFiles = glob($lockPattern);
         if ($lockFiles !== false) {
             foreach ($lockFiles as $lockFile) {
                 $this->releaseLockFile($lockFile);
+            }
+        }
+
+        $lockDirectories = glob(sprintf('%s/*', $this->locksDirectoryPath()));
+        if ($lockDirectories !== false) {
+            foreach ($lockDirectories as $dir) {
+                if (is_dir($dir) === true) {
+                    @rmdir($dir);
+                }
             }
         }
     }
@@ -182,7 +206,9 @@ final readonly class OPCache implements CacheStore
 
     protected function lockPath(string $key): string
     {
-        return sprintf('%s/%s.lock', $this->locksDirectoryPath(), $this->keyHash($key));
+        $hash = $this->keyHash($key);
+
+        return sprintf('%s/%s/%s.lock', $this->locksDirectoryPath(), substr($hash, 0, 2), $hash);
     }
 
     /**
@@ -245,9 +271,12 @@ final readonly class OPCache implements CacheStore
      */
     private function writeFile(string $path, array $record): void
     {
+        $directory = dirname($path);
+        $this->filesystem->ensureDirectoryExists($directory);
+
         $content = sprintf("<?php\n\ndeclare(strict_types=1);\n\nreturn %s;\n", var_export($record, return: true));
 
-        $temporaryPath = tempnam($this->directory, '.cache-');
+        $temporaryPath = tempnam($directory, '.cache-');
         if ($temporaryPath === false) {
             throw new CacheException(sprintf('Unable to create temporary cache file for [%s].', $path));
         }
@@ -271,7 +300,9 @@ final readonly class OPCache implements CacheStore
 
     private function dataPath(string $key): string
     {
-        return sprintf('%s/%s%s', $this->directoryPath(), $this->keyHash($key), $this->extension);
+        $hash = $this->keyHash($key);
+
+        return sprintf('%s/%s/%s%s', $this->directoryPath(), substr($hash, 0, 2), $hash, $this->extension);
     }
 
     private function directoryPath(): string

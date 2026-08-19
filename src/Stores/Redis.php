@@ -8,8 +8,10 @@ use Closure;
 use JsonException;
 use Kivara\Cache\Contracts\CacheLock;
 use Kivara\Cache\Contracts\CacheStore;
+use Kivara\Cache\Enums\Ttl;
 use Kivara\Cache\Exceptions\CacheException;
 use Kivara\Cache\Services\RedisLock;
+use Override;
 use Random\RandomException;
 use Redis as RedisConnection;
 use RedisException;
@@ -40,9 +42,7 @@ final readonly class Redis implements CacheStore
         $this->prefix = rtrim($namespace, ':') . ':';
     }
 
-    /**
-     * @throws CacheException
-     */
+    #[Override]
     public function get(string $key): mixed
     {
         try {
@@ -66,7 +66,8 @@ final readonly class Redis implements CacheStore
     /**
      * @throws CacheException
      */
-    public function put(string $key, mixed $callback, ?int $ttl = null): void
+    #[Override]
+    public function put(string $key, mixed $callback, Ttl|int|null $ttl = null): void
     {
         if ($callback instanceof Closure) {
             throw new CacheException('Closures cannot be stored in the Redis cache.');
@@ -80,9 +81,11 @@ final readonly class Redis implements CacheStore
             );
         }
 
+        $ttlSeconds = $ttl instanceof Ttl ? $ttl->value : $ttl;
+
         try {
-            if (is_int($ttl) === true && $ttl > 0) {
-                $this->connection->set($this->prefix . $key, $payload, ['EX' => $ttl]);
+            if (is_int($ttlSeconds) && $ttlSeconds > 0) {
+                $this->connection->set($this->prefix . $key, $payload, ['EX' => $ttlSeconds]);
             } else {
                 $this->connection->set($this->prefix . $key, $payload);
             }
@@ -94,6 +97,7 @@ final readonly class Redis implements CacheStore
     /**
      * @throws CacheException
      */
+    #[Override]
     public function has(string $key): bool
     {
         try {
@@ -106,6 +110,7 @@ final readonly class Redis implements CacheStore
     /**
      * @throws CacheException
      */
+    #[Override]
     public function forget(string $key): void
     {
         try {
@@ -118,6 +123,7 @@ final readonly class Redis implements CacheStore
     /**
      * @throws CacheException
      */
+    #[Override]
     public function flush(): void
     {
         try {

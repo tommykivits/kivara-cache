@@ -1,6 +1,6 @@
 # Kivara Cache
 
-A simple and robust caching component for the Kivara Framework, supporting multiple stores and atomic locks to prevent cache stampedes.
+A simple, robust, and PSR-6 compliant caching component for the Kivara Framework, supporting multiple stores and atomic locks to prevent cache stampedes.
 
 ## Features
 
@@ -34,8 +34,11 @@ $cache = new Cache($store);
 ### Storing Items
 
 ```php
-// Store an item for a specific amount of time (in seconds)
+use Kivara\Cache\Enums\Ttl;
+
+// Store an item for a specific amount of time (in seconds or using Ttl enum)
 $cache->put('key', 'value', 3600);
+$cache->put('key', 'value', Ttl::HOUR);
 
 // Store an item indefinitely
 $cache->put('key', 'value');
@@ -87,22 +90,24 @@ $value = $cache->remember('users.all', function () {
 
 ### File Store
 
-Stores cache data in the local file system.
+Stores cache data in the local file system. Cache files and lock files are automatically partitioned into two-character hex subdirectories to ensure scalability and high filesystem performance.
+
+Lock files are stored inside the `locks/` folder of the specified cache directory (e.g., `<dir>/locks/c3/c3ab...lock`).
 
 ```php
 use Kivara\Cache\Stores\File;
 
-$store = new File('/path/to/cache/directory', '.php');
+$store = new File('/path/to/cache/directory', '.cache');
 ```
 
 ### OPCache Store
 
-Stores cache data using PHP's OPCache. This is generally faster as it leverages memory-based storage for compiled PHP scripts.
+Stores cache data using PHP's OPCache. This leverages memory-based storage for compiled PHP scripts. Lock files are placed within the `locks/` folder of the cache directory.
 
 ```php
 use Kivara\Cache\Stores\OPCache;
 
-$store = new OPCache('/path/to/cache/directory', '.php');
+$store = new OPCache('/path/to/cache/directory', '.cache.php');
 ```
 
 ### Redis Store
@@ -120,7 +125,7 @@ $store = new Redis($redis, 'my_app_cache');
 
 ### APCu Store
 
-Stores cache data in shared memory using APCu. Requires the `ext-apcu` extension. Note that locking for APCu still uses file-based locks.
+Stores cache data in shared memory using APCu. Requires the `ext-apcu` extension. Lock files are partitioned into subdirectories within the specified lock directory.
 
 ```php
 use Kivara\Cache\Stores\APCu;
@@ -137,11 +142,12 @@ namespace App\Cache;
 
 use Kivara\Cache\Contracts\CacheLock;
 use Kivara\Cache\Contracts\CacheStore;
+use Kivara\Cache\Enums\Ttl;
 
 class MyCustomStore implements CacheStore
 {
     public function get(string $key): mixed { /* ... */ }
-    public function put(string $key, mixed $value, ?int $ttl = null): void { /* ... */ }
+    public function put(string $key, mixed $callback, Ttl|int|null $ttl = null): void { /* ... */ }
     public function has(string $key): bool { /* ... */ }
     public function forget(string $key): void { /* ... */ }
     public function flush(): void { /* ... */ }

@@ -7,11 +7,15 @@ namespace Kivara\Cache\Stores;
 use Closure;
 use JsonException;
 use Kivara\Cache\Contracts\CacheStore;
+use Kivara\Cache\Enums\Ttl;
 use Kivara\Cache\Exceptions\CacheException;
 use Kivara\Cache\Services\FileLock;
+use Kivara\Cache\Services\Filesystem;
 use Kivara\Cache\Traits\HasFileLocks;
+use Override;
 
 use function array_key_exists;
+use function dirname;
 use function file_exists;
 use function file_get_contents;
 use function file_put_contents;
@@ -24,10 +28,11 @@ use function is_dir;
 use function is_int;
 use function json_decode;
 use function json_encode;
-use function mkdir;
 use function rename;
+use function rmdir;
 use function rtrim;
 use function sprintf;
+use function substr;
 use function time;
 use function unlink;
 
@@ -50,19 +55,17 @@ final readonly class File implements CacheStore
     public function __construct(
         private string $directory,
         private string $extension = '.cache',
+        private Filesystem $filesystem = new Filesystem(),
     ) {
-        if (
-            is_dir($this->directory) === false
-            && mkdir($this->directory, 0755, recursive: true) === false
-            && is_dir($this->directory) === false
-        ) {
-            throw new CacheException(sprintf('Cache directory [%s] could not be created.', $this->directory));
+        foreach([$this->directory, $this->locksDirectoryPath()] as $dir) {
+            $this->filesystem->ensureDirectoryExists($dir);
         }
     }
 
     /**
      * @throws CacheException
      */
+    #[Override]
     public function get(string $key): mixed
     {
         $record = $this->readRecord($key);
@@ -82,13 +85,15 @@ final readonly class File implements CacheStore
     /**
      * @throws CacheException
      */
-    public function put(string $key, mixed $callback, ?int $ttl = null): void
+    #[Override]
+    public function put(string $key, mixed $callback, Ttl|int|null $ttl = null): void
     {
         if ($callback instanceof Closure) {
             throw new CacheException('Closures cannot be stored in the file cache.');
         }
 
-        $expiresAt = $ttl !== null ? time() + $ttl : null;
+        $ttlSeconds = $ttl instanceof Ttl ? $ttl->value : $ttl;
+        $expiresAt = $ttlSeconds !== null ? time() + $ttlSeconds : null;
 
         $this->writeRecord($key, ['value' => $callback, 'expires_at' => $expiresAt]);
     }
@@ -96,6 +101,7 @@ final readonly class File implements CacheStore
     /**
      * @throws CacheException
      */
+    #[Override]
     public function has(string $key): bool
     {
         $record = $this->readRecord($key);
@@ -115,6 +121,7 @@ final readonly class File implements CacheStore
     /**
      * @throws CacheException
      */
+    #[Override]
     public function forget(string $key): void
     {
         $path = $this->dataPath($key);
@@ -128,9 +135,10 @@ final readonly class File implements CacheStore
     /**
      * @throws CacheException
      */
+    #[Override]
     public function flush(): void
     {
-        $pattern = sprintf('%s/*%s', $this->directoryPath(), $this->extension);
+        $pattern = sprintf('%s/*/*%s', $this->directoryPath(), $this->extension);
 
         $files = glob($pattern);
         if ($files !== false) {
@@ -141,12 +149,30 @@ final readonly class File implements CacheStore
             }
         }
 
-        $lockPattern = sprintf('%s/locks/*.lock', $this->directoryPath());
+        $directories = glob(sprintf('%s/*', $this->directoryPath()));
+        if ($directories !== false) {
+            foreach ($directories as $dir) {
+                if (is_dir($dir) === true && $dir !== $this->locksDirectoryPath()) {
+                    @rmdir($dir);
+                }
+            }
+        }
+
+        $lockPattern = sprintf('%s/*/*.lock', $this->locksDirectoryPath());
 
         $lockFiles = glob($lockPattern);
         if ($lockFiles !== false) {
             foreach ($lockFiles as $lockFile) {
                 $this->releaseLockFile($lockFile);
+            }
+        }
+
+        $lockDirectories = glob(sprintf('%s/*', $this->locksDirectoryPath()));
+        if ($lockDirectories !== false) {
+            foreach ($lockDirectories as $dir) {
+                if (is_dir($dir) === true) {
+                    @rmdir($dir);
+                }
             }
         }
     }
@@ -172,7 +198,9 @@ final readonly class File implements CacheStore
 
     protected function lockPath(string $key): string
     {
-        return sprintf('%s/%s.lock', $this->directoryPath() . '/locks', hash('sha256', $key));
+        $hash = hash('sha256', $key);
+
+        return sprintf('%s/%s/%s.lock', $this->locksDirectoryPath(), substr($hash, 0, 2), $hash);
     }
 
     /**
@@ -223,8 +251,8 @@ final readonly class File implements CacheStore
     private function writeRecord(string $key, array $record): void
     {
         $path = $this->dataPath($key);
+        $this->filesystem->ensureDirectoryExists(dirname($path));
         $temporaryPath = sprintf('%s.tmp.%d', $path, getmypid());
-
         try {
             $contents = json_encode($record, JSON_THROW_ON_ERROR);
         } catch (JsonException $exception) {
@@ -263,11 +291,18 @@ final readonly class File implements CacheStore
 
     private function basePath(string $key): string
     {
-        return $this->directoryPath() . '/' . hash('sha256', $key);
+        $hash = hash('sha256', $key);
+
+        return sprintf('%s/%s/%s', $this->directoryPath(), substr($hash, 0, 2), $hash);
     }
 
     private function directoryPath(): string
     {
         return rtrim($this->directory, '/');
+    }
+
+    private function locksDirectoryPath(): string
+    {
+        return $this->directoryPath() . '/locks';
     }
 }

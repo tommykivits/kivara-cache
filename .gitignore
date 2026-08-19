@@ -1,2 +1,5 @@
 /vendor/
+/cache/
+/locks/
 composer.lock
+index.php

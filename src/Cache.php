@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Kivara\Cache;
 
 use Kivara\Cache\Contracts\CacheStore;
+use Kivara\Cache\Enums\Ttl;
 use Kivara\Cache\Exceptions\CacheException;
 
 final readonly class Cache
@@ -14,12 +15,15 @@ final readonly class Cache
     ) {
     }
 
+    /**
+     * @throws CacheException
+     */
     public function get(string $key): mixed
     {
         return $this->store->get($key);
     }
 
-    public function put(string $key, mixed $callback, ?int $ttl = null): void
+    public function put(string $key, mixed $callback, Ttl|int|null $ttl = null): void
     {
         $this->store->put($key, $callback, $ttl);
     }
@@ -27,7 +31,7 @@ final readonly class Cache
     /**
      * @throws CacheException
      */
-    public function remember(string $key, callable $callback, ?int $ttl = null): mixed
+    public function remember(string $key, callable $callback, Ttl|int|null $ttl = null): mixed
     {
         if ($this->store->has($key)) {
             return $this->store->get($key);
